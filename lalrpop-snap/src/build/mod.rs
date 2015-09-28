@@ -15,11 +15,34 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::exit;
+use std::fs::OpenOptions;
+use std::env;
 
 mod filetext;
 
+macro_rules! println_stderr (
+  ($($arg:tt)*) => ( {
+    let mut file = OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .open("build.log").unwrap();
+    match writeln!(&mut file, "OUT_DIR={}", env::var("OUT_DIR").unwrap()) {
+      Ok(_) => {},
+      Err(x) => panic!("Unable to write to log: {}", x),
+    }
+    match writeln!(&mut file, $($arg)* ) {
+      Ok(_) => {},
+      Err(x) => panic!("Unable to write to log: {}", x),
+    }
+  }
+  )
+);
+
 pub fn process_root() -> io::Result<()> {
-    process_dir("src", false)
+    println!("hello from process_proot?");
+    println_stderr!("process root!");
+    process_dir("src", false);
+    Ok(())
 }
 
 pub fn process_root_unconditionally() -> io::Result<()> {
@@ -27,6 +50,7 @@ pub fn process_root_unconditionally() -> io::Result<()> {
 }
 
 fn process_dir<P:AsRef<Path>>(root_dir: P, force_build: bool) -> io::Result<()> {
+    println_stderr!("process_dir:");
     let lalrpop_files = try!(lalrpop_files(root_dir));
     for lalrpop_file in lalrpop_files {
         let rs_file = lalrpop_file.with_extension("rs");
@@ -41,7 +65,10 @@ fn process_dir<P:AsRef<Path>>(root_dir: P, force_build: bool) -> io::Result<()> 
 }
 
 fn remove_old_file(rs_file: &Path) -> io::Result<()> {
-    match fs::remove_file(rs_file) {
+    println_stderr!("about to remove old file: {:?}", rs_file);
+    let res = fs::remove_file(rs_file);
+    println_stderr!("remove_file returned {:?}", res);
+    match res {
         Ok(()) => Ok(()),
         Err(e) => {
             // Unix reports NotFound, Windows PermissionDenied!
@@ -101,6 +128,13 @@ fn make_read_only(rs_file: &Path) -> io::Result<()> {
     let rs_metadata = try!(fs::metadata(&rs_file));
     let mut rs_permissions = rs_metadata.permissions();
     rs_permissions.set_readonly(true);
+    fs::set_permissions(&rs_file, rs_permissions)
+}
+
+fn make_writeable(rs_file: &Path) -> io::Result<()> {
+    let rs_metadata = try!(fs::metadata(&rs_file));
+    let mut rs_permissions = rs_metadata.permissions();
+    rs_permissions.set_readonly(false);
     fs::set_permissions(&rs_file, rs_permissions)
 }
 
@@ -211,6 +245,8 @@ fn emit_uses<W:Write>(grammar: &r::Grammar,
 
 fn emit_recursive_ascent(output_path: &Path, grammar: &r::Grammar) -> io::Result<()>
 {
+    try!(make_writeable(output_path));
+    println_stderr!("about to create {:?}", output_path);
     let output_file = try!(fs::File::create(output_path));
     let mut rust = RustWrite::new(output_file);
 
